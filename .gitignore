@@ -1,0 +1,24 @@
+bin/
+build/
+obj/
+dist/
+release/
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+.pixi/
+.claude/
+.headtracking-state.json
+*.dll
+*.pdb
+*.exe
+.lab/
+NEXUS_MODS.md
+
+# Machine-generated agent instructions / skills / MCP config (not tracked)
+CLAUDE.md
+AGENTS.md
+.mcp.json
+.mcp.local.json

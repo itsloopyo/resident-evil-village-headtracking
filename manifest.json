@@ -1,0 +1,9 @@
+{
+    "name":  "RE8HeadTracking",
+    "author":  "itsloopyo",
+    "version":  "0.0.0",
+    "description":  "Head tracking for Resident Evil Village via OpenTrack",
+    "game":  "Resident Evil Village",
+    "repository":  "https://github.com/itsloopyo/resident-evil-village-headtracking",
+    "license":  "MIT"
+}

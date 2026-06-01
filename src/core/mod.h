@@ -1,0 +1,133 @@
+#pragma once
+
+#include "config.h"
+#include <cameraunlock/protocol/udp_receiver.h>
+#include <cameraunlock/processing/tracking_processor.h>
+#include <cameraunlock/processing/pose_interpolator.h>
+#include <cameraunlock/processing/position_processor.h>
+#include <cameraunlock/processing/position_interpolator.h>
+#include <cstdio>
+#include <string>
+
+namespace RE8HT {
+
+enum class TrackingMode {
+    Full = 0,          // both rotation and position
+    RotationOnly = 1,  // position disabled
+    PositionOnly = 2,  // rotation disabled
+};
+
+class Mod {
+public:
+    static Mod& Instance();
+
+    bool Initialize();
+    void Shutdown();
+
+    bool IsEnabled() const { return m_enabled.load(); }
+    void SetEnabled(bool enabled);
+    void Toggle();
+
+    void Recenter();
+    void CycleTrackingMode();
+    void ToggleYawMode();
+    void PlaceDiagnosticMarker();
+    void ToggleMarkersHidden();
+
+    // Hotkey callbacks fire on the HotkeyPoller's background thread. Recenter,
+    // CycleTrackingMode and ToggleMarkersHidden all touch state owned by the
+    // render thread (non-atomic processor/interpolator smoothing state and the
+    // GUI element-dumper's unordered_set). Mutating that set concurrently with
+    // the on_pre_gui_draw_element callback that inserts into it is a genuine
+    // heap-corruption race. The hotkey thread only sets a request flag here;
+    // ProcessDeferredActions() runs the action on the render thread.
+    void RequestRecenter() { m_recenterRequested.store(true, std::memory_order_relaxed); }
+    void RequestCycleTrackingMode() { m_cycleModeRequested.store(true, std::memory_order_relaxed); }
+    void RequestToggleMarkersHidden() { m_toggleMarkersRequested.store(true, std::memory_order_relaxed); }
+    void ProcessDeferredActions();
+
+    Config& GetConfig() { return m_config; }
+    const Config& GetConfig() const { return m_config; }
+
+    // Advance interpolation + smoothing pipelines once per render frame.
+    // Caches the smoothed rotation and position so every in-frame consumer
+    // (camera matrix, crosshair projection, GUI marker compensation) reads
+    // an identical value. Without this, per-element GUI calls would each
+    // re-tick the pipeline with a fragmented dt, leaving the rendered
+    // camera advancing on a partial-frame dt while position smoothing sees
+    // an even smaller one.
+    void TickFrame();
+
+    bool GetProcessedRotation(float& yaw, float& pitch, float& roll);
+    bool GetPositionOffset(float& x, float& y, float& z);
+    bool IsPositionEnabled() const {
+        return static_cast<TrackingMode>(m_trackingMode.load()) != TrackingMode::RotationOnly;
+    }
+    bool IsRotationEnabled() const {
+        return static_cast<TrackingMode>(m_trackingMode.load()) != TrackingMode::PositionOnly;
+    }
+    bool IsWorldSpaceYaw() const { return m_worldSpaceYaw.load(std::memory_order_relaxed); }
+    float GetLastDeltaTime() const { return m_lastDeltaTime; }
+    bool AreMarkersHidden() const { return m_markersHidden.load(); }
+
+    Mod(const Mod&) = delete;
+    Mod& operator=(const Mod&) = delete;
+
+private:
+    Mod() = default;
+    ~Mod() = default;
+
+    bool LoadConfig();
+    void InitDiagnosticLog();
+
+    std::atomic<bool> m_enabled{false};
+    std::atomic<bool> m_initialized{false};
+    std::atomic<bool> m_markersHidden{false};
+
+    Config m_config;
+    cameraunlock::UdpReceiver m_udpReceiver;
+    cameraunlock::PoseInterpolator m_poseInterpolator;
+    cameraunlock::TrackingProcessor m_processor;
+    int64_t m_lastReceiveTimestamp = 0;
+
+    cameraunlock::PositionProcessor m_positionProcessor;
+    cameraunlock::PositionInterpolator m_positionInterpolator;
+    std::atomic<int> m_trackingMode{static_cast<int>(TrackingMode::Full)};
+    std::atomic<bool> m_worldSpaceYaw{false};
+
+    // Deferred hotkey-action requests, consumed on the render thread by
+    // ProcessDeferredActions(). See the Request* methods above.
+    std::atomic<bool> m_recenterRequested{false};
+    std::atomic<bool> m_cycleModeRequested{false};
+    std::atomic<bool> m_toggleMarkersRequested{false};
+
+    uint64_t m_lastFrameTickTime = 0;
+    float m_lastDeltaTime = 0.016f;
+
+    float m_cachedYaw = 0.0f;
+    float m_cachedPitch = 0.0f;
+    float m_cachedRoll = 0.0f;
+    bool m_cachedRotationValid = false;
+
+    float m_cachedPositionX = 0.0f;
+    float m_cachedPositionY = 0.0f;
+    float m_cachedPositionZ = 0.0f;
+    bool m_cachedPositionValid = false;
+
+    bool m_hasCentered = false;
+    int m_stabilizationFrames = 0;
+
+    // Previous raw values for new-sample detection (data change, not just packet arrival)
+    float m_lastRawYaw = 0.0f;
+    float m_lastRawPitch = 0.0f;
+    float m_lastRawRoll = 0.0f;
+
+    // Diagnostic logging
+    std::string m_pluginDir;
+    FILE* m_diagFile = nullptr;
+    uint64_t m_diagStartTime = 0;
+    bool m_diagMarkerPending = false;
+    int m_diagMarkerCount = 0;
+};
+
+} // namespace RE8HT
