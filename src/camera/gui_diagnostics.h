@@ -4,10 +4,6 @@
 
 namespace RE8HT {
 
-// Resolve via.gui.GUI.findObjects(System.Type), the 1-arg overload taking a
-// System.Type. Returns nullptr if the type or overload is unavailable.
-reframework::API::Method* FindGuiFindObjectsByTypeMethod();
-
 // Run one-shot GUI discovery (method enumeration for debugging).
 // Called once during initialization.
 void DiscoverGUICameraAccess();

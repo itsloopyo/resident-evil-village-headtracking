@@ -3,57 +3,26 @@
 #include "gui_diagnostics.h"
 #include "camera_internal.h"
 #include "game_state_detector.h"
-#include "value_smoother.h"
 #include "core/mod.h"
 #include "core/logger.h"
 
+#include <cameraunlock/math/smoothing_utils.h>
 #include <cameraunlock/reframework/managed_utils.h>
 #include <cameraunlock/reframework/re_math.h>
-#include <cameraunlock/math/smoothing_utils.h>
+#include <cameraunlock/rendering/gui_marker_compensation.h>
 
 #include <reframework/API.hpp>
 #include <unordered_set>
 #include <string>
 #include <string_view>
 #include <cmath>
-#include <span>
 
 namespace RE8HT {
 
 namespace ref = cameraunlock::reframework;
 
-// One-argument invoke backed by a caller-supplied stack slot, avoiding the
-// per-call std::vector<void*> heap allocation that the string/vector invoke
-// overloads incur. Hot GUI compensation paths invoke set_Position dozens of
-// times per frame; each of those was an alloc+free pair.
-static inline reframework::InvokeRet InvokeArg1(
-    reframework::API::Method* method, reframework::API::ManagedObject* obj, void* arg) {
-    void* args[1] = { arg };
-    return method->invoke(obj, std::span<void*>(args, 1));
-}
-
-// No-arg getter whose resolved Method* is cached against the object's concrete
-// type. GUI draw elements (and their GameObjects) keep a stable type frame to
-// frame, so this turns a per-element string method search (a cross-DLL scan of
-// the type's method table) into a pointer compare on the steady-state path.
-// Resolution is identical to invoke(name, ...): same type, same find_method.
-struct CachedGetter {
-    const char* name;
-    reframework::API::TypeDefinition* td = nullptr;
-    reframework::API::Method* method = nullptr;
-    explicit CachedGetter(const char* n) : name(n) {}
-
-    reframework::InvokeRet Invoke(reframework::API::ManagedObject* obj) {
-        auto t = obj->get_type_definition();
-        if (!t) return {};
-        if (t != td) {
-            td = t;
-            method = t->find_method(name);
-        }
-        if (!method) return {};
-        return method->invoke(obj, ref::EmptyArgs());
-    }
-};
+using ref::CachedGetter;
+using ref::InvokeMethodWithArg;
 
 // GUI method cache — only the live methods needed for compensation.
 static struct {
@@ -71,7 +40,8 @@ void InitGUICompensationMethods() {
     g_guiMethods.transformSetPosition = ref::FindMethodByParamCount("via.gui.TransformObject", "set_Position", 1);
     g_guiMethods.transformGetGlobalPosition = ref::FindMethodByParamCount("via.gui.TransformObject", "get_GlobalPosition", 0);
 
-    g_guiMethods.guiFindObjectsByType = FindGuiFindObjectsByTypeMethod();
+    // via.gui.GUI.findObjects — the 1-arg overload taking a System.Type.
+    g_guiMethods.guiFindObjectsByType = ref::FindMethodByParamTypeName("via.gui.GUI", "findObjects", "Type");
 
     Logger::Instance().Info("GUI compensation methods: playObjType=%p findObjects(Type)=%p setPos=%p getGlobalPos=%p",
         (void*)g_guiMethods.playObjectRuntimeType,
@@ -82,78 +52,18 @@ void InitGUICompensationMethods() {
 
 // --- FOV helpers ---
 
-static float GetLivePrimaryCameraFov() {
-    // Delegate to the camera_hook's cached methods via the shared API
-    // This is a simplified version that reads FOV through the standard chain.
-    static bool s_diagLogged = false;
-    static reframework::API::Method* s_getMainView = nullptr;
-    static reframework::API::Method* s_getPrimaryCamera = nullptr;
-    static reframework::API::Method* s_getCameraFov = nullptr;
-    static bool s_initialized = false;
-
-    if (!s_initialized) {
-        s_initialized = true;
-        const auto& api = reframework::API::get();
-        auto tdb = api->tdb();
-        auto smType = tdb->find_type("via.SceneManager");
-        auto svType = tdb->find_type("via.SceneView");
-        auto camType = tdb->find_type("via.Camera");
-        if (smType) s_getMainView = smType->find_method("get_MainView");
-        if (svType) s_getPrimaryCamera = svType->find_method("get_PrimaryCamera");
-        if (camType) s_getCameraFov = camType->find_method("get_FOV");
-    }
-
-    if (!s_getMainView || !s_getPrimaryCamera || !s_getCameraFov) return 0.f;
-
-    const auto& api = reframework::API::get();
-    void* sm = api->get_native_singleton("via.SceneManager");
-    if (!sm) return 0.f;
-
-    auto mv = s_getMainView->invoke(
-        reinterpret_cast<reframework::API::ManagedObject*>(sm), ref::EmptyArgs());
-    if (mv.exception_thrown || !mv.ptr) return 0.f;
-
-    auto cam = s_getPrimaryCamera->invoke(
-        reinterpret_cast<reframework::API::ManagedObject*>(mv.ptr), ref::EmptyArgs());
-    if (cam.exception_thrown || !cam.ptr) return 0.f;
-
-    if (!s_diagLogged) {
-        auto camMo = reinterpret_cast<reframework::API::ManagedObject*>(cam.ptr);
-        auto td = camMo->get_type_definition();
-        const char* tns = (td && td->get_namespace()) ? td->get_namespace() : "";
-        const char* tnm = (td && td->get_name()) ? td->get_name() : "?";
-        Logger::Instance().Info("GetLivePrimaryCameraFov: primary camera type = %s.%s", tns, tnm);
-    }
-
-    auto fov = s_getCameraFov->invoke(
-        reinterpret_cast<reframework::API::ManagedObject*>(cam.ptr), ref::EmptyArgs());
-    if (fov.exception_thrown) return 0.f;
-
-    float fovDeg = DecodeFovDegrees(fov.f, fov.d);
-
-    if (!s_diagLogged) {
-        Logger::Instance().Info("GetLivePrimaryCameraFov: raw f=%.4f d=%.4f -> chose %.4f", fov.f, fov.d, fovDeg);
-        s_diagLogged = true;
-    }
-
-    return fovDeg;
-}
-
 static bool GetMarkerProjectionFocalLengths(float& fx, float& fy) {
     fx = 0.f;
     fy = 0.f;
     constexpr float kHalfW = 960.f;
     constexpr float kHalfH = 540.f;
-    constexpr float kAspect = kHalfW / kHalfH;
 
-    float fov = GetLivePrimaryCameraFov();
-    if (fov < 10.f || fov > 170.f) return false;
+    float fov = CameraResolver().ResolveFovDegrees();
+    if (!cameraunlock::rendering::FocalLengthsFromVerticalFov(fov, kHalfW, kHalfH, fx, fy)) {
+        return false;
+    }
 
     static bool s_fallbackLogged = false;
-    float tanHFovY = tanf(fov * DEG_TO_RAD * 0.5f);
-    float tanHFovX = tanHFovY * kAspect;
-    fx = kHalfW / tanHFovX;
-    fy = kHalfH / tanHFovY;
     if (!s_fallbackLogged) {
         Logger::Instance().Info("Marker focal lengths: assuming get_FOV %.1f is vertical -> fx=%.1f fy=%.1f",
             fov, fx, fy);
@@ -188,8 +98,8 @@ static void ApplyCrosshairOffset(reframework::API::ManagedObject* guiMo) {
     uint32_t descendantCount = 0;
     reframework::API::ManagedObject* playObjArr = nullptr;
     {
-        auto arrRet = InvokeArg1(g_guiMethods.guiFindObjectsByType, guiMo,
-                                 (void*)g_guiMethods.playObjectRuntimeType);
+        auto arrRet = InvokeMethodWithArg(g_guiMethods.guiFindObjectsByType, guiMo,
+                                          (void*)g_guiMethods.playObjectRuntimeType);
         if (!arrRet.exception_thrown && arrRet.ptr) {
             playObjArr = reinterpret_cast<reframework::API::ManagedObject*>(arrRet.ptr);
             auto lenRet = playObjArr->invoke("get_Length", ref::EmptyArgs());
@@ -233,7 +143,7 @@ static void ApplyCrosshairOffset(reframework::API::ManagedObject* guiMo) {
                 auto elem = ref::ArrayGetValue(childArr, (int)i);
                 if (!elem) continue;
 
-                InvokeArg1(g_guiMethods.transformSetPosition, elem, (void*)&zeroPos[0]);
+                InvokeMethodWithArg(g_guiMethods.transformSetPosition, elem, (void*)&zeroPos[0]);
                 auto gpRet = g_guiMethods.transformGetGlobalPosition->invoke(elem, ref::EmptyArgs());
                 if (gpRet.exception_thrown) continue;
 
@@ -244,13 +154,13 @@ static void ApplyCrosshairOffset(reframework::API::ManagedObject* guiMo) {
                 float rotY = gx * sinR + gy * cosR;
 
                 float finalPos[3] = { (rotX - gx) + deltaX, (rotY - gy) + deltaY, 0.f };
-                InvokeArg1(g_guiMethods.transformSetPosition, elem, (void*)&finalPos[0]);
+                InvokeMethodWithArg(g_guiMethods.transformSetPosition, elem, (void*)&finalPos[0]);
             }
         } else {
             for (uint32_t i = 0; i < cap; i++) {
                 auto elem = ref::ArrayGetValue(childArr, (int)i);
                 if (!elem) continue;
-                InvokeArg1(g_guiMethods.transformSetPosition, elem, (void*)&pos[0]);
+                InvokeMethodWithArg(g_guiMethods.transformSetPosition, elem, (void*)&pos[0]);
             }
         }
     } else {
@@ -264,7 +174,7 @@ static void ApplyCrosshairOffset(reframework::API::ManagedObject* guiMo) {
         if (!layoutElem) return;
 
         float absPos[3] = { 960.0f + deltaX, 540.0f + deltaY, 0.f };
-        InvokeArg1(g_guiMethods.transformSetPosition, layoutElem, (void*)&absPos[0]);
+        InvokeMethodWithArg(g_guiMethods.transformSetPosition, layoutElem, (void*)&absPos[0]);
 
         static int s_verifyFrame = 0;
         if ((s_verifyFrame++ % 120) == 0 && g_guiMethods.transformGetGlobalPosition) {
@@ -321,8 +231,8 @@ static void ApplyMarkerCompensation(reframework::API::ManagedObject* guiMo) {
     const float tanHFovX = tanHFovY * aspect_;
 
     // Resolve child[1].
-    auto arrRet = InvokeArg1(g_guiMethods.guiFindObjectsByType, guiMo,
-                             (void*)g_guiMethods.playObjectRuntimeType);
+    auto arrRet = InvokeMethodWithArg(g_guiMethods.guiFindObjectsByType, guiMo,
+                                      (void*)g_guiMethods.playObjectRuntimeType);
     if (arrRet.exception_thrown || !arrRet.ptr) return;
     auto arr = reinterpret_cast<reframework::API::ManagedObject*>(arrRet.ptr);
     auto lenRet = arr->invoke("get_Length", ref::EmptyArgs());
@@ -332,7 +242,7 @@ static void ApplyMarkerCompensation(reframework::API::ManagedObject* guiMo) {
     if (!child1) return;
 
     float zeroPos[3] = { 0.f, 0.f, 0.f };
-    InvokeArg1(g_guiMethods.transformSetPosition, child1, (void*)&zeroPos[0]);
+    InvokeMethodWithArg(g_guiMethods.transformSetPosition, child1, (void*)&zeroPos[0]);
 
     static int s_markerDiagFrame = 0;
     bool markerDiag = ((s_markerDiagFrame++ % 120) == 0);
@@ -434,13 +344,12 @@ static void ApplyMarkerCompensation(reframework::API::ManagedObject* guiMo) {
     // Smooth marker delta to eliminate jitter from FOV fluctuations and
     // anchor readback variance.
     {
-        static ExponentialSmoother s_markerDeltaX;
-        static ExponentialSmoother s_markerDeltaY;
+        static cameraunlock::math::SmoothedFloat s_markerDeltaX;
+        static cameraunlock::math::SmoothedFloat s_markerDeltaY;
         constexpr float kSmoothing = static_cast<float>(cameraunlock::math::kBaselineSmoothing);
         float dt = Mod::Instance().GetLastDeltaTime();
-        float t = cameraunlock::math::CalculateSmoothingFactor(kSmoothing, dt);
-        deltaX = s_markerDeltaX.Update(deltaX, t);
-        deltaY = s_markerDeltaY.Update(deltaY, t);
+        deltaX = s_markerDeltaX.Update(deltaX, kSmoothing, dt);
+        deltaY = s_markerDeltaY.Update(deltaY, kSmoothing, dt);
     }
 
     if (markerDiag) {
@@ -454,7 +363,7 @@ static void ApplyMarkerCompensation(reframework::API::ManagedObject* guiMo) {
     }
 
     float pos[3] = { deltaX, deltaY, 0.f };
-    InvokeArg1(g_guiMethods.transformSetPosition, child1, (void*)&pos[0]);
+    InvokeMethodWithArg(g_guiMethods.transformSetPosition, child1, (void*)&pos[0]);
 }
 
 // --- Main dispatcher ---

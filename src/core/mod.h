@@ -1,21 +1,13 @@
 #pragma once
 
 #include "config.h"
+#include <cameraunlock/input/deferred_actions.h>
 #include <cameraunlock/protocol/udp_receiver.h>
-#include <cameraunlock/processing/tracking_processor.h>
-#include <cameraunlock/processing/pose_interpolator.h>
-#include <cameraunlock/processing/position_processor.h>
-#include <cameraunlock/processing/position_interpolator.h>
+#include <cameraunlock/tracking/head_tracking_session.h>
 #include <cstdio>
 #include <string>
 
 namespace RE8HT {
-
-enum class TrackingMode {
-    Full = 0,          // both rotation and position
-    RotationOnly = 1,  // position disabled
-    PositionOnly = 2,  // rotation disabled
-};
 
 class Mod {
 public:
@@ -39,11 +31,11 @@ public:
     // render thread (non-atomic processor/interpolator smoothing state and the
     // GUI element-dumper's unordered_set). Mutating that set concurrently with
     // the on_pre_gui_draw_element callback that inserts into it is a genuine
-    // heap-corruption race. The hotkey thread only sets a request flag here;
-    // ProcessDeferredActions() runs the action on the render thread.
-    void RequestRecenter() { m_recenterRequested.store(true, std::memory_order_relaxed); }
-    void RequestCycleTrackingMode() { m_cycleModeRequested.store(true, std::memory_order_relaxed); }
-    void RequestToggleMarkersHidden() { m_toggleMarkersRequested.store(true, std::memory_order_relaxed); }
+    // heap-corruption race. The hotkey thread only requests the action here;
+    // ProcessDeferredActions() runs it on the render thread.
+    void RequestRecenter() { m_recenterRequested.Request(); }
+    void RequestCycleTrackingMode() { m_cycleModeRequested.Request(); }
+    void RequestToggleMarkersHidden() { m_toggleMarkersRequested.Request(); }
     void ProcessDeferredActions();
 
     Config& GetConfig() { return m_config; }
@@ -60,12 +52,8 @@ public:
 
     bool GetProcessedRotation(float& yaw, float& pitch, float& roll);
     bool GetPositionOffset(float& x, float& y, float& z);
-    bool IsPositionEnabled() const {
-        return static_cast<TrackingMode>(m_trackingMode.load()) != TrackingMode::RotationOnly;
-    }
-    bool IsRotationEnabled() const {
-        return static_cast<TrackingMode>(m_trackingMode.load()) != TrackingMode::PositionOnly;
-    }
+    bool IsPositionEnabled() const { return m_session.IsPositionActive(); }
+    bool IsRotationEnabled() const { return m_session.IsRotationActive(); }
     bool IsWorldSpaceYaw() const { return m_worldSpaceYaw.load(std::memory_order_relaxed); }
     float GetLastDeltaTime() const { return m_lastDeltaTime; }
     bool AreMarkersHidden() const { return m_markersHidden.load(); }
@@ -86,41 +74,17 @@ private:
 
     Config m_config;
     cameraunlock::UdpReceiver m_udpReceiver;
-    cameraunlock::PoseInterpolator m_poseInterpolator;
-    cameraunlock::TrackingProcessor m_processor;
-    int64_t m_lastReceiveTimestamp = 0;
-
-    cameraunlock::PositionProcessor m_positionProcessor;
-    cameraunlock::PositionInterpolator m_positionInterpolator;
-    std::atomic<int> m_trackingMode{static_cast<int>(TrackingMode::Full)};
+    cameraunlock::HeadTrackingSession<cameraunlock::UdpReceiver> m_session{m_udpReceiver};
     std::atomic<bool> m_worldSpaceYaw{false};
 
     // Deferred hotkey-action requests, consumed on the render thread by
     // ProcessDeferredActions(). See the Request* methods above.
-    std::atomic<bool> m_recenterRequested{false};
-    std::atomic<bool> m_cycleModeRequested{false};
-    std::atomic<bool> m_toggleMarkersRequested{false};
+    cameraunlock::input::DeferredAction m_recenterRequested;
+    cameraunlock::input::DeferredAction m_cycleModeRequested;
+    cameraunlock::input::DeferredAction m_toggleMarkersRequested;
 
     uint64_t m_lastFrameTickTime = 0;
     float m_lastDeltaTime = 0.016f;
-
-    float m_cachedYaw = 0.0f;
-    float m_cachedPitch = 0.0f;
-    float m_cachedRoll = 0.0f;
-    bool m_cachedRotationValid = false;
-
-    float m_cachedPositionX = 0.0f;
-    float m_cachedPositionY = 0.0f;
-    float m_cachedPositionZ = 0.0f;
-    bool m_cachedPositionValid = false;
-
-    bool m_hasCentered = false;
-    int m_stabilizationFrames = 0;
-
-    // Previous raw values for new-sample detection (data change, not just packet arrival)
-    float m_lastRawYaw = 0.0f;
-    float m_lastRawPitch = 0.0f;
-    float m_lastRawRoll = 0.0f;
 
     // Diagnostic logging
     std::string m_pluginDir;

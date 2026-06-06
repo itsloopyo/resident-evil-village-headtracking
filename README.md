@@ -1,3 +1,10 @@
+> [!CAUTION]
+> ## Experimental prototype - expect missing core features
+>
+> This is **not** a finished mod.
+>
+> Current builds may only test whether head tracking can drive the camera. Bug fixes and core features like decoupled look/aim, independent reticle behavior, correct shot direction, off-screen reticle support, movement handling, and comfort tuning may be missing at this early stage of development.
+
 # Resident Evil Village Head Tracking
 
 An unofficial flatscreen head tracking mod for Resident Evil Village that decouples where you look from where you aim, letting you glance around with a webcam, phone, or any OpenTrack-compatible tracker while your mouse keeps control of the crosshair, no VR headset required.
