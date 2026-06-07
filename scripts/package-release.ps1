@@ -87,6 +87,24 @@ foreach ($vendorFile in @("REFramework.zip", "LICENSE", "README.md")) {
     Write-Host "  vendor/reframework/$vendorFile" -ForegroundColor Green
 }
 
+# Stage the launcher manifest at the ZIP root. The launcher (Lopari) reads
+# this for native, receipt-tracked deployment; install.cmd is the legacy path.
+# Stamp the real release version and refresh the seeded default config from the
+# live HeadTracking.ini so the committed base64 can never drift out of sync.
+$manifestSrc = Join-Path $projectDir "launcher-manifest.json"
+if (-not (Test-Path $manifestSrc)) {
+    throw "launcher-manifest.json not found at $manifestSrc."
+}
+# Stamp via raw-text replacement, not a ConvertTo-Json round-trip: PowerShell
+# 5.1's ConvertTo-Json unwraps single-element arrays (files/archives/seed),
+# which would silently corrupt the manifest the launcher parses.
+$manifestText = Get-Content $manifestSrc -Raw
+$iniB64 = [System.Convert]::ToBase64String([System.IO.File]::ReadAllBytes($iniPath))
+$manifestText = $manifestText -replace '("version":\s*")[^"]*(")', "`${1}$version`${2}"
+$manifestText = $manifestText -replace '("content_b64":\s*")[^"]*(")', "`${1}$iniB64`${2}"
+Set-Content (Join-Path $ghStagingDir "launcher-manifest.json") -Value $manifestText -NoNewline
+Write-Host "  launcher-manifest.json (v$version)" -ForegroundColor Green
+
 $docFiles = @("README.md", "LICENSE", "CHANGELOG.md", "THIRD-PARTY-NOTICES.md")
 foreach ($doc in $docFiles) {
     $docPath = Join-Path $projectDir $doc
