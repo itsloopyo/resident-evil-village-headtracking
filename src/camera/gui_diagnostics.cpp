@@ -18,12 +18,13 @@ namespace RE8HT {
 namespace ref = cameraunlock::reframework;
 
 // Only GUI elements whose GameObject name starts with one of these prefixes
-// get dumped.
+// get dumped. RE Village names its HUD GameObjects per-purpose rather than with
+// RE9/Requiem's numeric `Gui_ui20xx` scheme.
 static const char* const g_dumpGoNameAllowPrefixes[] = {
-    "Gui_ui2010",  // world-anchored interaction prompt
-    "Gui_ui2020",  // crosshair/reticle
-    "Gui_ui2021",  // secondary crosshair element
-    "Gui_ui2050",  // ammo display
+    "GUIInteractIcon",     // world-anchored interaction prompt
+    "GUIInteractFarIcon",  // distant interaction prompt
+    "GUIGuide",            // objective guidance marker
+    "GUIReticle",          // aim reticle (speculative; confirmed via scan when aiming)
 };
 
 static std::unordered_set<std::string> g_dumpedGuiKeys;

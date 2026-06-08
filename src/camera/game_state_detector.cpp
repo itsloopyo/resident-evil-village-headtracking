@@ -6,10 +6,24 @@
 #include <cameraunlock/reframework/game_state_probing.h>
 
 #include <reframework/API.hpp>
+#include <atomic>
 
 namespace RE8HT {
 
 namespace ref = cameraunlock::reframework;
+
+// Last GetTickCount64() at which a title/main-menu GUI element drew. Written
+// from the render thread (GUI hook) and read from the same thread in
+// RefreshGameState; atomic for clarity of the cross-function handoff.
+static std::atomic<uint64_t> g_mainMenuTick{0};
+
+// Hold window: keep suppressing for a few refresh intervals after the last
+// menu draw so a single missed frame does not flicker tracking back on.
+static constexpr uint64_t MAIN_MENU_HOLD_MS = 300;
+
+void NotifyMainMenuDrawn() {
+    g_mainMenuTick.store(GetTickCount64(), std::memory_order_relaxed);
+}
 
 // Resolved method + singleton name pairs for runtime checks
 using ref::MethodCheck;
@@ -410,6 +424,17 @@ void RefreshGameState() {
 
         newState = true;
     } while (false);
+
+    // Title / main-menu suppression. The menu's 3D backdrop passes every tier
+    // above, so fall back to the one unambiguous signal: GUIMainMenu / GUITitle
+    // were drawn within the hold window.
+    if (newState) {
+        uint64_t menuTick = g_mainMenuTick.load(std::memory_order_relaxed);
+        if (menuTick != 0 && (now - menuTick) < MAIN_MENU_HOLD_MS) {
+            newState = false;
+            if (diag) Logger::Instance().Info("Diag: suppressed by main-menu signal");
+        }
+    }
 
     g_state.inGameplay = newState;
 
