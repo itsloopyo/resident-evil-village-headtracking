@@ -4,7 +4,7 @@ This project uses the following third-party software.
 
 ## REFramework
 
-- **Version:** nightly-01380 (commit `0436e04`)
+- **Version:** nightly-01394 (commit `0436e04`)
 - **License:** MIT
 - **Upstream:** https://github.com/praydog/REFramework
 - **Usage:** Plugin host and SDK for RE Engine games. Provides method hooking, type-system access, and per-GUI-element draw callbacks for the head-tracking plugin.
