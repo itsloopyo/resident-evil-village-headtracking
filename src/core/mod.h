@@ -4,7 +4,6 @@
 #include <cameraunlock/input/deferred_actions.h>
 #include <cameraunlock/protocol/udp_receiver.h>
 #include <cameraunlock/tracking/head_tracking_session.h>
-#include <cstdio>
 #include <string>
 
 namespace RE8HT {
@@ -20,20 +19,17 @@ public:
     void SetEnabled(bool enabled);
     void Toggle();
 
-    void Recenter();
     void CycleTrackingMode();
     void ToggleYawMode();
-    void PlaceDiagnosticMarker();
     void ToggleMarkersHidden();
 
-    // Hotkey callbacks fire on the HotkeyPoller's background thread. Recenter,
-    // CycleTrackingMode and ToggleMarkersHidden all touch state owned by the
+    // Hotkey callbacks fire on the HotkeyPoller's background thread.
+    // CycleTrackingMode and ToggleMarkersHidden both touch state owned by the
     // render thread (non-atomic processor/interpolator smoothing state and the
     // GUI element-dumper's unordered_set). Mutating that set concurrently with
     // the on_pre_gui_draw_element callback that inserts into it is a genuine
     // heap-corruption race. The hotkey thread only requests the action here;
     // ProcessDeferredActions() runs it on the render thread.
-    void RequestRecenter() { m_recenterRequested.Request(); }
     void RequestCycleTrackingMode() { m_cycleModeRequested.Request(); }
     void RequestToggleMarkersHidden() { m_toggleMarkersRequested.Request(); }
     void ProcessDeferredActions();
@@ -49,6 +45,11 @@ public:
     // camera advancing on a partial-frame dt while position smoothing sees
     // an even smaller one.
     void TickFrame();
+
+    // Latches the first tracker packet. Called from an ungated point in the
+    // render callback: the answer to "did the tracker ever send anything"
+    // must not depend on tracking being enabled or the camera hook engaging.
+    void LogFirstTrackerPose();
 
     bool GetProcessedRotation(float& yaw, float& pitch, float& roll);
     bool GetPositionOffset(float& x, float& y, float& z);
@@ -66,7 +67,6 @@ private:
     ~Mod() = default;
 
     bool LoadConfig();
-    void InitDiagnosticLog();
 
     std::atomic<bool> m_enabled{false};
     std::atomic<bool> m_initialized{false};
@@ -79,19 +79,15 @@ private:
 
     // Deferred hotkey-action requests, consumed on the render thread by
     // ProcessDeferredActions(). See the Request* methods above.
-    cameraunlock::input::DeferredAction m_recenterRequested;
     cameraunlock::input::DeferredAction m_cycleModeRequested;
     cameraunlock::input::DeferredAction m_toggleMarkersRequested;
+
+    bool m_loggedFirstPose = false;
 
     uint64_t m_lastFrameTickTime = 0;
     float m_lastDeltaTime = 0.016f;
 
-    // Diagnostic logging
     std::string m_pluginDir;
-    FILE* m_diagFile = nullptr;
-    uint64_t m_diagStartTime = 0;
-    bool m_diagMarkerPending = false;
-    int m_diagMarkerCount = 0;
 };
 
 } // namespace RE8HT

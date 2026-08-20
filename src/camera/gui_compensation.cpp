@@ -22,7 +22,7 @@ using ref::InvokeMethodWithArg;
 static struct {
     // Shift a GUI element's root View by a screen-space pixel offset.
     reframework::API::Method* transformSetPosition = nullptr;
-    // via.Camera.get_ProjectionMatrix — exact per-axis focal lengths, avoiding
+    // via.Camera.get_ProjectionMatrix - exact per-axis focal lengths, avoiding
     // the FOV-convention / square-pixel guess the FOV fallback has to make.
     reframework::API::Method* getProjectionMatrix = nullptr;
 } g_guiMethods;
@@ -44,7 +44,7 @@ void InitGUICompensationMethods() {
 // matrix is unavailable. The FOV fallback assumes a 16:9 square-pixel canvas,
 // which mis-scales the horizontal (yaw) axis relative to the vertical whenever
 // the real projection differs (ultrawide, non-16:9, or a differing FOV axis
-// convention) — the projection-matrix path has no such assumption.
+// convention) - the projection-matrix path has no such assumption.
 static bool ComputeMarkerFocalLengths(float& fx, float& fy) {
     constexpr float kHalfW = 960.f;
     constexpr float kHalfH = 540.f;
@@ -114,8 +114,12 @@ static void ApplyMarkerCompensation(reframework::API::ManagedObject* guiMo) {
     float pos[3] = { deltaX, deltaY, 0.f };
     InvokeMethodWithArg(g_guiMethods.transformSetPosition, view, (void*)&pos[0]);
 
+    // Capped: the 120-frame interval alone streams for the whole
+    // session, which buries the startup chain a user is asked to send.
     static int s_markerDiagFrame = 0;
-    if ((s_markerDiagFrame++ % 120) == 0) {
+    static int s_markerDiagFrameLeft = 5;
+    if (s_markerDiagFrameLeft > 0 && (s_markerDiagFrame++ % 120) == 0) {
+        s_markerDiagFrameLeft--;
         Logger::Instance().Info("Marker comp: fx=%.1f fy=%.1f tanR=%.4f tanU=%.4f delta=(%.1f,%.1f)",
             fx, fy, g_marker.tanRight, g_marker.tanUp, deltaX, deltaY);
     }
