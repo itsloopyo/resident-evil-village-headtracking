@@ -235,9 +235,13 @@ MIT License - see [LICENSE](LICENSE) for details.
 ## Credits
 
 - [Capcom](https://www.capcom.com/) - Resident Evil Village
-- [praydog](https://github.com/praydog/REFramework) - REFramework
+- [praydog](https://github.com/praydog/REFramework) - REFramework, the loader and plugin SDK this mod is built on
+- [Tsuda Kageyu](https://github.com/TsudaKageyu/minhook) - MinHook, the function hooking library
 - [OpenTrack](https://github.com/opentrack/opentrack) - Head tracking software
 - [CameraUnlock Core](https://github.com/itsloopyo/cameraunlock-core) - Shared tracking, smoothing, and camera library
+
+Full licence terms for everything bundled or compiled in are in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), which ships in both release ZIPs.
 
 ## Disclaimer
 

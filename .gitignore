@@ -22,3 +22,11 @@ CLAUDE.md
 AGENTS.md
 .mcp.json
 .mcp.local.json
+
+# Reverse-engineering scratch. Ignored before anything lands in it: a blob
+# pushed once stays served by SHA even after the commit or branch is deleted.
+tools/
+dumps/
+scratch/
+*.dmp
+*.gzf

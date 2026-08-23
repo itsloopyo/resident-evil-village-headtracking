@@ -105,13 +105,19 @@ $manifestText = $manifestText -replace '("content_b64":\s*")[^"]*(")', "`${1}$in
 Set-Content (Join-Path $ghStagingDir "launcher-manifest.json") -Value $manifestText -NoNewline
 Write-Host "  launcher-manifest.json (v$version)" -ForegroundColor Green
 
+# LICENSE and THIRD-PARTY-NOTICES.md are licence obligations, not niceties:
+# the ZIP redistributes the vendored REFramework loader and a DLL with
+# REFramework's SDK headers, MinHook and cameraunlock-core compiled in. A
+# missing one is a compliance failure, so fail the build rather than skipping
+# the copy and going green.
 $docFiles = @("README.md", "LICENSE", "CHANGELOG.md", "THIRD-PARTY-NOTICES.md")
 foreach ($doc in $docFiles) {
     $docPath = Join-Path $projectDir $doc
-    if (Test-Path $docPath) {
-        Copy-Item $docPath -Destination $ghStagingDir -Force
-        Write-Host "  $doc" -ForegroundColor Green
+    if (-not (Test-Path $docPath)) {
+        throw "Required document not found: $doc. Every published ZIP is a binary distribution and must carry it."
     }
+    Copy-Item $docPath -Destination $ghStagingDir -Force
+    Write-Host "  $doc" -ForegroundColor Green
 }
 
 $ghZipName = "RE8HeadTracking-v$version-installer.zip"
@@ -156,6 +162,17 @@ if (Test-Path $nexusZipPath) { Remove-Item $nexusZipPath -Force }
 Write-Host ""
 Write-Host "Creating Nexus ZIP..." -ForegroundColor Cyan
 
+# The Nexus ZIP is a binary distribution too: the licences of everything
+# compiled into or bundled with the payload require their notices to travel
+# with it, so LICENSE and THIRD-PARTY-NOTICES.md ship at its root.
+foreach ($noticeDoc in @('LICENSE', 'THIRD-PARTY-NOTICES.md', 'README.md')) {
+    $noticeSrc = Join-Path $projectDir $noticeDoc
+    if (-not (Test-Path $noticeSrc)) {
+        throw "Required notice file not found: $noticeDoc. Every published ZIP is a binary distribution and must carry it."
+    }
+    Copy-Item $noticeSrc -Destination $nexusStagingDir -Force
+    Write-Host "  $noticeDoc" -ForegroundColor Green
+}
 Push-Location $nexusStagingDir
 try {
     Compress-Archive -Path ".\*" -DestinationPath $nexusZipPath -Force
