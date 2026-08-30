@@ -1,59 +1,20 @@
 #pragma once
 
-#include "constants.h"
-
-#include <cstdint>
+#include <cameraunlock/reframework/plugin_config.h>
 
 namespace RE8HT {
 
-struct Config {
-    // Network
-    uint16_t udpPort = DEFAULT_UDP_PORT;
+using Config = cameraunlock::reframework::PluginConfig;
 
-    // Sensitivity
-    float yawMultiplier = 1.0f;
-    float pitchMultiplier = 1.0f;
-    float rollMultiplier = 1.0f;
-
-    // Smoothing. Selected per connection from the packet source address: a
-    // tracker on this machine (loopback) uses localSmoothing, a remote network
-    // device uses remoteSmoothing. Both cover rotation and position.
-    float localSmoothing = 0.0f;
-    float remoteSmoothing = 0.15f;
-
-    // Hotkeys (Virtual Key codes)
-    int toggleKey = DEFAULT_TOGGLE_KEY;
-    int positionToggleKey = DEFAULT_POSITION_TOGGLE_KEY;
-    int yawModeKey = DEFAULT_YAW_MODE_KEY;
-    int diagnosticMarkerKey = DEFAULT_DIAGNOSTIC_MARKER_KEY;
-
-    // Position (6DOF)
-    float positionSensitivityX = 1.0f;
-    float positionSensitivityY = 1.0f;
-    float positionSensitivityZ = 1.0f;
-    float positionLimitX = 0.30f;
-    float positionLimitY = 0.20f;
-    float positionLimitZ = 0.40f;
-    float positionLimitZBack = 0.10f;
-    // Protocol-to-engine axis conversion happens once, at the camera boundary:
-    // ApplyViewSpacePositionOffset takes offsetX and applies -offsetX. Setting
-    // this true cancels that negation and mirrors the lateral lean, which is
-    // what RE8 shipped and what put it the opposite way round from the rest of
-    // the fleet. A mirrored lean reads as working until something anchored in
-    // the world has to agree with it.
-    bool positionInvertX = false;
-    bool positionInvertY = false;
-    bool positionInvertZ = false;
-    bool positionEnabled = true;
-
-    // General
-    bool autoEnable = true;
-    bool worldSpaceYaw = true;
-
-    bool Load(const char* path);
-    bool Save(const char* path) const;
-    void SetDefaults();
-    void Validate();
+// RE Village's INI schema: the [Position] Invert keys, plus the F9
+// DiagnosticMarkerKey that toggles hiding the world-anchored markers. No
+// [Flashlight] section - the beam is not tracked on this title.
+inline constexpr cameraunlock::reframework::PluginConfigSchema kConfigSchema{
+    /*title*/ "RE8 Head Tracking",
+    /*positionInvertKeys*/ true,
+    /*flashlight*/ false,
+    /*diagnosticMarkerKey*/ true,
+    /*positionSensitivity*/ 1.0f,
 };
 
 } // namespace RE8HT

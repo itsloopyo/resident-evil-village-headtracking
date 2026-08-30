@@ -24,10 +24,6 @@ add_subdirectory(cameraunlock-core/cpp ${CMAKE_BINARY_DIR}/cameraunlock-core)
 add_library(RE8HeadTracking SHARED
     src/pch.cpp
     src/plugin_main.cpp
-    src/core/mod.cpp
-    src/core/config.cpp
-    src/core/logger.cpp
-    src/camera/camera_hook.cpp
     src/camera/gui_compensation.cpp
     src/camera/gui_diagnostics.cpp
     src/camera/game_state_detector.cpp

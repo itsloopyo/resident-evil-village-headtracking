@@ -1,18 +1,18 @@
 #pragma once
 
+namespace cameraunlock::reframework { class GameplayGate; }
+
 namespace RE8HT {
 
-// Returns true if the player is in active gameplay (not paused, menu, loading, etc.)
+// The gate the camera pipeline consults before writing the camera.
+cameraunlock::reframework::GameplayGate* GameplayGateInstance();
+
+// True while the player is in active gameplay (not paused, in a menu, loading,
+// or in a cutscene).
 bool IsInGameplay();
 
-// Call periodically to refresh cached game state
-void RefreshGameState();
-
-// Report that a title-screen / main-menu GUI element drew this frame. RE
-// Village renders a live 3D backdrop behind the title and main menu that
-// passes every gameplay tier (camera present, GlobalSpeed=1, no pause/event/
-// transition flags), so the only reliable non-gameplay signal there is that
-// GUIMainMenu / GUITitle are actively drawn. Called from the GUI hook.
+// GUIMainMenu / GUITitle drew this frame. Called from the GUI draw hook; see
+// the note in the .cpp for why this signal is needed.
 void NotifyMainMenuDrawn();
 
 } // namespace RE8HT
