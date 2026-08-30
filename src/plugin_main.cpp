@@ -40,6 +40,7 @@ const ref::PluginBootstrapDescriptor kPlugin = [] {
     d.camera.controllerCandidateCount =
         static_cast<int>(std::size(kControllerTypeCandidates));
     d.camera.gate = RE8HT::GameplayGateInstance();
+    d.centerGameWindow = true;
     d.camera.onInit = []() {
         RE8HT::DiscoverGUICameraAccess();
         ref::InitGuiMethods();

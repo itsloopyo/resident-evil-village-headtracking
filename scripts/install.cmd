@@ -13,7 +13,7 @@ set "MOD_VERSION=0.0.0"
 set "STATE_FILE=.headtracking-state.json"
 set "FRAMEWORK_TYPE=REFramework"
 set "REFRAMEWORK_VENDOR_ZIP_NAME=REFramework.zip"
-set "MOD_CONTROLS=Controls (nav-cluster keys, or Ctrl+Shift chords for keyboards without a nav cluster):&echo   End  / Ctrl+Shift+Y - Toggle head tracking&echo   PgUp / Ctrl+Shift+G - Cycle tracking mode&echo   PgDn / Ctrl+Shift+H - Toggle world/camera-local yaw&echo   F9                  - Toggle world-anchored GUI markers"
+set "MOD_CONTROLS=Controls (nav-cluster keys, or Ctrl+Shift chords for keyboards without a nav cluster):&echo   End  / Ctrl+Shift+Y - Toggle head tracking&echo   PgUp / Ctrl+Shift+G - Toggle positional tracking&echo   PgDn / Ctrl+Shift+H - Toggle world/camera-local yaw&echo   F9                  - Toggle world-anchored GUI markers"
 :: --- END CONFIG BLOCK ---
 
 :: Pin delayed expansion off before `%*` is expanded on the `call` below.
