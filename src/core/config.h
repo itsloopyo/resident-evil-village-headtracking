@@ -35,7 +35,13 @@ struct Config {
     float positionLimitY = 0.20f;
     float positionLimitZ = 0.40f;
     float positionLimitZBack = 0.10f;
-    bool positionInvertX = true;
+    // Protocol-to-engine axis conversion happens once, at the camera boundary:
+    // ApplyViewSpacePositionOffset takes offsetX and applies -offsetX. Setting
+    // this true cancels that negation and mirrors the lateral lean, which is
+    // what RE8 shipped and what put it the opposite way round from the rest of
+    // the fleet. A mirrored lean reads as working until something anchored in
+    // the world has to agree with it.
+    bool positionInvertX = false;
     bool positionInvertY = false;
     bool positionInvertZ = false;
     bool positionEnabled = true;

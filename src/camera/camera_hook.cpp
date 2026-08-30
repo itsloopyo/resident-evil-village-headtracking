@@ -20,12 +20,15 @@ namespace ref = cameraunlock::reframework;
 
 // --- Shared per-frame state (extern-declared in camera_internal.h) ---
 
-CrosshairProjection g_crosshair;
 MarkerProjection g_marker;
 CleanCameraMatrix g_cleanCameraMatrix;
 
 // Per-frame flag: set true when OnPreBeginRendering applies head tracking.
 static bool g_trackingAppliedThisFrame = false;
+
+// Bumped once per processed render frame. The GUI draw callbacks fire during
+// that same frame, so this is the key the focal-length memo invalidates on.
+uint64_t g_renderFrame = 0;
 
 // Saved game rotation - what the game INTENDED before we modified it
 static struct {
@@ -50,6 +53,8 @@ static void* GetCameraTransformCached() {
     g_cachedTransform = g_cameraResolver.ResolveTransform(&g_cachedCamera);
     return g_cachedTransform;
 }
+
+void* CachedCamera() { return g_cachedCamera; }
 
 // --- Core head tracking application ---
 
@@ -180,65 +185,15 @@ static bool InitCachedFunctions() {
     return true;
 }
 
-// Crosshair projection: where the clean aim point appears on the head-tracked
-// screen. Smoothed to eliminate jitter from perspective-division noise and
-// per-frame FOV fluctuations. Reads the clean matrix from g_cleanCameraMatrix.
-static void UpdateCrosshairProjection(const Matrix4x4f& head) {
-    const Matrix4x4f& clean = g_cleanCameraMatrix.matrix;
-
-    constexpr float kAimDist = 50.0f;
-    float rawTanRight = 0.f, rawTanUp = 0.f;
-    if (ref::ProjectAimToViewTangents(clean, head, kAimDist, rawTanRight, rawTanUp)) {
-        // Read FOV from the live camera resolved this frame; hold the previous
-        // value when the read fails.
-        float rawFov = g_cameraResolver.ResolveFovDegrees(g_cachedCamera);
-        if (rawFov <= 0.f) rawFov = g_crosshair.fovDegrees;
-
-        float dt = Mod::Instance().GetLastDeltaTime();
-        // Internal projection-smoothing constant, deliberately independent of the user's tracking smoothing.
-        constexpr float kCrosshairSmoothing = 0.15f;
-
-        static cameraunlock::math::SmoothedFloat s_tanRight;
-        static cameraunlock::math::SmoothedFloat s_tanUp;
-        static cameraunlock::math::SmoothedFloat s_fov;
-
-        g_crosshair.tanRight = s_tanRight.Update(rawTanRight, kCrosshairSmoothing, dt);
-        g_crosshair.tanUp = s_tanUp.Update(rawTanUp, kCrosshairSmoothing, dt);
-        g_crosshair.fovDegrees = s_fov.Update(rawFov, kCrosshairSmoothing, dt);
-        g_crosshair.valid = g_crosshair.fovDegrees > 10.f;
-
-        float roll = 0.f, yaw = 0.f, pitch = 0.f;
-        Mod::Instance().GetProcessedRotation(yaw, pitch, roll);
-        g_crosshair.rollDegrees = roll;
-    } else {
-        g_crosshair.valid = false;
-    }
-
-    // Capped: the 120-frame interval alone streams for the whole
-    // session, which buries the startup chain a user is asked to send.
-    static int s_projFrame = 0;
-    static int s_projFrameLeft = 5;
-    if (s_projFrameLeft > 0 && (s_projFrame++ % 120) == 0) {
-        s_projFrameLeft--;
-        Logger::Instance().Info("Crosshair proj: tanR=%.4f tanU=%.4f fov=%.1f valid=%d | "
-            "clean fwd=(%.3f,%.3f,%.3f) pos=(%.1f,%.1f,%.1f) | "
-            "head fwd=(%.3f,%.3f,%.3f) pos=(%.1f,%.1f,%.1f)",
-            g_crosshair.tanRight, g_crosshair.tanUp, g_crosshair.fovDegrees, g_crosshair.valid,
-            clean.m[2][0], clean.m[2][1], clean.m[2][2],
-            clean.m[3][0], clean.m[3][1], clean.m[3][2],
-            head.m[2][0], head.m[2][1], head.m[2][2],
-            head.m[3][0], head.m[3][1], head.m[3][2]);
-    }
-}
-
-// Marker projection: rotation-only. OnPostBeginRendering restores clean
-// rotation but keeps the head-tracked position, so at GUI draw time the
-// game's projection matrix is (clean rotation, head position). Anything
-// the GUI projects through that matrix gets translation parallax for
-// free - leaning shifts the world anchor's screen position the same way
-// it shifts the rendered scene, so the marker tracks the target without
-// any help from us. Only rotation needs to be compensated manually
-// (because the rotation was reset to clean).
+// Marker projection: rotation-only, and deliberately carrying no lean term.
+//
+// A marker sits at its own depth and parallax is lean/depth, so one screen-space
+// translation cannot be right for more than one marker at a time - and the
+// compensation below moves every marker in a GUI with a single write. What this
+// leaves uncorrected is the markers' own parallax, since the engine projects
+// them from the clean eye while the frame is drawn from the leaned one. That
+// error is lean/depth, which fades with distance, and markers are mostly
+// distant.
 static void UpdateMarkerProjection(const Matrix4x4f& head) {
     float rawTanRight = 0.f, rawTanUp = 0.f;
     if (ref::ProjectForwardToViewTangents(g_cleanCameraMatrix.matrix, head, rawTanRight, rawTanUp)) {
@@ -254,6 +209,23 @@ static void UpdateMarkerProjection(const Matrix4x4f& head) {
         g_marker.valid = true;
     } else {
         g_marker.valid = false;
+    }
+
+    // Capped: the 120-frame interval alone streams for the whole session,
+    // which buries the startup chain a user is asked to send.
+    static int s_projFrame = 0;
+    static int s_projFrameLeft = 5;
+    if (s_projFrameLeft > 0 && (s_projFrame++ % 120) == 0) {
+        s_projFrameLeft--;
+        const Matrix4x4f& clean = g_cleanCameraMatrix.matrix;
+        Logger::Instance().Info("Marker proj: tanR=%.4f tanU=%.4f valid=%d | "
+            "clean fwd=(%.3f,%.3f,%.3f) pos=(%.1f,%.1f,%.1f) | "
+            "head fwd=(%.3f,%.3f,%.3f) pos=(%.1f,%.1f,%.1f)",
+            g_marker.tanRight, g_marker.tanUp, g_marker.valid,
+            clean.m[2][0], clean.m[2][1], clean.m[2][2],
+            clean.m[3][0], clean.m[3][1], clean.m[3][2],
+            head.m[2][0], head.m[2][1], head.m[2][2],
+            head.m[3][0], head.m[3][1], head.m[3][2]);
     }
 }
 
@@ -274,6 +246,7 @@ void OnPreBeginRendering() {
     if (!Mod::Instance().IsEnabled()) return;
     if (!IsInGameplay()) return;
     EnsureCameraControllerHooked();
+    ++g_renderFrame;
 
     // Advance interpolation + smoothing once per render frame. Every
     // downstream consumer (ApplyHeadTracking, crosshair projection, GUI
@@ -294,7 +267,6 @@ void OnPreBeginRendering() {
     ApplyHeadTracking(worldMat);
     g_trackingAppliedThisFrame = true;
 
-    UpdateCrosshairProjection(*worldMat);
     UpdateMarkerProjection(*worldMat);
 }
 
@@ -313,12 +285,20 @@ void OnPostBeginRendering() {
     Matrix4x4f* worldMat = reinterpret_cast<Matrix4x4f*>(
         reinterpret_cast<uint8_t*>(transform) + ref::kTransformWorldMatrixOffset);
     __try {
-        // Restore clean ROTATION but keep head-tracked POSITION.
-        Matrix4x4f restored = g_cleanCameraMatrix.matrix;
-        restored.m[3][0] = worldMat->m[3][0];
-        restored.m[3][1] = worldMat->m[3][1];
-        restored.m[3][2] = worldMat->m[3][2];
-        *worldMat = restored;
+        // Restore the clean camera in full - POSITION as well as rotation.
+        //
+        // Keeping the head-tracked translation row left the game aiming off a
+        // leaned eye: the shot converges on the leaned eye's axis while the
+        // round leaves the un-leaned body, so reticle and impact agree at
+        // exactly one range and splay apart either side of it, swapping sides
+        // as the player walks through it. Head tracking must not move where
+        // bullets go.
+        //
+        // The lean still renders. Rotation is written and taken back at the
+        // same two hooks and rotation is what the player sees, so the camera
+        // matrix the renderer consumes is snapshotted between them; the
+        // translation row is in that same matrix.
+        *worldMat = g_cleanCameraMatrix.matrix;
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
 
     g_cachedTransform = nullptr;

@@ -3,6 +3,7 @@
 #include "config.h"
 #include <cameraunlock/input/deferred_actions.h>
 #include <cameraunlock/protocol/udp_receiver.h>
+#include <cameraunlock/time/frame_clock.h>
 #include <cameraunlock/tracking/head_tracking_session.h>
 #include <string>
 
@@ -84,7 +85,7 @@ private:
 
     bool m_loggedFirstPose = false;
 
-    uint64_t m_lastFrameTickTime = 0;
+    cameraunlock::time::FrameClock m_frameClock;
     float m_lastDeltaTime = 0.016f;
 
     std::string m_pluginDir;

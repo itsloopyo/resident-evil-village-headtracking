@@ -49,7 +49,8 @@ static bool ComputeMarkerFocalLengths(float& fx, float& fy) {
     constexpr float kHalfW = 960.f;
     constexpr float kHalfH = 540.f;
 
-    void* cam = CameraResolver().ResolveCamera();
+    void* cam = CachedCamera();
+    if (!cam) cam = CameraResolver().ResolveCamera();
     if (!cam) return false;
 
     if (g_guiMethods.getProjectionMatrix) {
@@ -65,6 +66,13 @@ static bool ComputeMarkerFocalLengths(float& fx, float& fy) {
                     Logger::Instance().Info("Marker focal (projection): P00=%.4f P11=%.4f fx=%.1f fy=%.1f",
                         m[0], m[5], fx, fy);
                 }
+                // Square pixels: horizontal and vertical pixel focal lengths must
+                // match. RE8's matrix reports them equal, but the RE3 build proved
+                // this projection path can return P00 at half its true value
+                // (fx ends up half of fy), which under-compensates yaw and drifts
+                // the markers horizontally. fy (vertical) is the trusted value;
+                // enforce fx = fy so a divergent matrix can never slip through.
+                fx = fy;
                 return true;
             }
         }
@@ -72,6 +80,26 @@ static bool ComputeMarkerFocalLengths(float& fx, float& fy) {
 
     float fov = CameraResolver().ResolveFovDegrees(cam);
     return cameraunlock::rendering::FocalLengthsFromVerticalFov(fov, kHalfW, kHalfH, fx, fy);
+}
+
+// Per-frame memo over ComputeMarkerFocalLengths. The camera's projection is
+// fixed for a rendered frame, but the draw callback fires once per compensated
+// element, and each call would otherwise re-resolve the camera and pull its
+// projection matrix across the managed VM for an identical answer.
+static bool GetMarkerFocalLengthsCached(float& fx, float& fy) {
+    static uint64_t s_frame = static_cast<uint64_t>(-1);
+    static bool s_ok = false;
+    static float s_fx = 0.f;
+    static float s_fy = 0.f;
+
+    if (s_frame != g_renderFrame) {
+        s_frame = g_renderFrame;
+        s_ok = ComputeMarkerFocalLengths(s_fx, s_fy);
+    }
+    if (!s_ok) return false;
+    fx = s_fx;
+    fy = s_fy;
+    return true;
 }
 
 // RE8's world-anchored HUD markers. RE Village's HUD GameObjects are named
@@ -88,26 +116,28 @@ static bool IsWorldMarker(const char* goName) {
 
 // --- Marker compensation ---
 //
-// OnPostBeginRendering restores clean rotation but keeps the head-tracked
-// position, so at GUI draw time the game's projection matrix is
-// (clean rotation, head position). A world-anchored marker projected through
-// that matrix already tracks head translation (lean parallax) for free; only
-// the rotation needs compensating, because the rotation was reset to clean.
-// g_marker carries exactly that: the screen-space tangent shift of the view
-// forward direction under head rotation, with no position contribution
+// OnPostBeginRendering restores the clean camera in full, so at GUI draw time
+// the game projects world anchors from the clean eye while the frame was drawn
+// from the head-rotated one. g_marker is the screen-space tangent shift of the
+// view forward direction under that rotation, with no position contribution
 // (ProjectForwardToViewTangents). Converting it to a pixel offset and shifting
 // the element's root View glues the marker back onto its world target.
+//
+// Lean parallax is deliberately not added: it is lean/depth, this is one write
+// for every marker in the GUI, and no single value is right for more than one
+// depth. See UpdateMarkerProjection.
 static void ApplyMarkerCompensation(reframework::API::ManagedObject* guiMo) {
     if (!guiMo || !g_guiMethods.transformSetPosition) return;
     if (!g_marker.valid || !Mod::Instance().IsEnabled() || !IsInGameplay()) return;
 
     float fx = 0.f, fy = 0.f;
-    if (!ComputeMarkerFocalLengths(fx, fy)) return;
+    if (!GetMarkerFocalLengthsCached(fx, fy)) return;
 
     float deltaX = -g_marker.tanRight * fx;
     float deltaY =  g_marker.tanUp * fy;
 
-    auto viewRet = guiMo->invoke("get_View", ref::EmptyArgs());
+    static CachedGetter s_getView("get_View");
+    auto viewRet = s_getView.Invoke(guiMo);
     if (viewRet.exception_thrown || !viewRet.ptr) return;
     auto view = reinterpret_cast<reframework::API::ManagedObject*>(viewRet.ptr);
 
