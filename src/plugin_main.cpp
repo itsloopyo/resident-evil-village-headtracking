@@ -7,10 +7,16 @@
 #include "camera/gui_diagnostics.h"
 #include "core/config.h"
 
+#include <cameraunlock/config/defaults_file.h>
 #include <cameraunlock/input/hotkey_poller.h>
+#include <cameraunlock/input/key_binding_registration.h>
+#include <cameraunlock/input/key_bindings.h>
 #include <cameraunlock/reframework/gameplay_gate.h>
 #include <cameraunlock/reframework/gui_elements.h>
 #include <cameraunlock/reframework/plugin_bootstrap.h>
+
+#include <stdexcept>
+#include <string>
 
 namespace ref = cameraunlock::reframework;
 
@@ -36,6 +42,8 @@ const ref::PluginBootstrapDescriptor kPlugin = [] {
     d.mod.displayName = RE8HT::RE8HT_PLUGIN_NAME;
     d.mod.version = RE8HT::RE8HT_VERSION;
     d.mod.config = RE8HT::kConfigSchema;
+    d.mod.gameName = RE8HT::kGameName;
+    d.mod.defaults = cameraunlock::config::DefaultsFile::PerUser();
     d.camera.controllerCandidateTypes = kControllerTypeCandidates;
     d.camera.controllerCandidateCount =
         static_cast<int>(std::size(kControllerTypeCandidates));
@@ -49,10 +57,17 @@ const ref::PluginBootstrapDescriptor kPlugin = [] {
     d.preGuiDrawElement = &RE8HT::OnPreGuiDrawElement;
     d.registerExtraHotkeys = [](cameraunlock::input::HotkeyPoller& poller,
                                 const ref::PluginConfig& config) {
-        // F9: toggle hiding of the world-anchored GUI markers. The GUI draw
-        // callback returns false for marker elements while the flag is set.
-        // Full marker info is dumped to the log on first sight regardless.
-        poller.AddHotkey(config.diagnosticMarkerKey, []() {
+        // DiagnosticMarkerKey (F9): toggle hiding of the world-anchored GUI
+        // markers. The GUI draw callback returns false for marker elements while
+        // the flag is set. Full marker info is dumped to the log on first sight
+        // regardless.
+        const cameraunlock::input::KeyBindingsParseResult parsed =
+            cameraunlock::input::ParseKeyBindings(config.diagnosticMarkerKeyBindings);
+        if (!parsed.ok()) {
+            throw std::logic_error("DiagnosticMarkerKey '" + config.diagnosticMarkerKeyBindings +
+                                   "' does not parse: " + parsed.error);
+        }
+        cameraunlock::input::RegisterKeyBindings(poller, parsed.bindings, []() {
             RE8HT::RequestToggleMarkersHidden();
         });
     };

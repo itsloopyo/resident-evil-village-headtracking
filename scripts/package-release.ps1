@@ -31,11 +31,6 @@ if (-not (Test-Path $dllPath)) {
     throw "RE8HeadTracking.dll not found at: $dllPath"
 }
 
-$iniPath = Join-Path $projectDir "HeadTracking.ini"
-if (-not (Test-Path $iniPath)) {
-    throw "HeadTracking.ini not found at: $iniPath"
-}
-
 $scriptsDir = Join-Path $projectDir "scripts"
 foreach ($script in @("install.cmd", "uninstall.cmd")) {
     $scriptPath = Join-Path $scriptsDir $script
@@ -65,9 +60,6 @@ New-Item -ItemType Directory -Path $pluginsDir -Force | Out-Null
 Copy-Item $dllPath -Destination $pluginsDir -Force
 Write-Host "  plugins/RE8HeadTracking.dll" -ForegroundColor Green
 
-Copy-Item $iniPath -Destination $pluginsDir -Force
-Write-Host "  plugins/HeadTracking.ini" -ForegroundColor Green
-
 # Stage the vendored REFramework so install.cmd can extract it offline.
 # Vendor tree is the install-time source of truth; the build/package
 # pipeline never refreshes it - bump via `pixi run update-deps`.
@@ -89,16 +81,12 @@ foreach ($vendorFile in @("REFramework.zip", "LICENSE", "README.md")) {
 
 # Stage the launcher manifest at the ZIP root. The launcher (Lopari) reads
 # this for native, receipt-tracked deployment; install.cmd is the legacy path.
-# Stamp the real release version. The seeded default config is not re-stamped:
-# the committed manifest is the authoritative copy of it, reviewable and in git
-# where the blob inside the ZIP is a build product, so drift fails the build
-# instead of being papered over in a staged copy that leaves the committed file
-# stale.
+# Stamp the real release version. No config is shipped in either ZIP or seeded
+# by the manifest: the mod creates CameraUnlock.ini at first launch.
 $manifestSrc = Join-Path $projectDir "launcher-manifest.json"
 if (-not (Test-Path $manifestSrc)) {
     throw "launcher-manifest.json not found at $manifestSrc."
 }
-Assert-ManifestSeedsMatchShipped -ManifestPath $manifestSrc -ProjectRoot $projectDir
 # Stamp via raw-text replacement, not a ConvertTo-Json round-trip: PowerShell
 # 5.1's ConvertTo-Json unwraps single-element arrays (files/archives/seed),
 # which would silently corrupt the manifest the launcher parses.
@@ -153,9 +141,6 @@ New-Item -ItemType Directory -Path $nexusPluginsDir -Force | Out-Null
 
 Copy-Item $dllPath -Destination $nexusPluginsDir -Force
 Write-Host "  reframework/plugins/RE8HeadTracking.dll" -ForegroundColor Green
-
-Copy-Item $iniPath -Destination $nexusPluginsDir -Force
-Write-Host "  reframework/plugins/HeadTracking.ini" -ForegroundColor Green
 
 $nexusZipName = "RE8HeadTracking-v$version-nexus.zip"
 $nexusZipPath = Join-Path $releaseDir $nexusZipName

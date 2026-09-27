@@ -23,14 +23,12 @@ $projectRoot = Split-Path -Parent $scriptDir
 Import-Module (Join-Path $projectRoot "cameraunlock-core\powershell\DevDeploy.psm1") -Force
 Import-Module (Join-Path $projectRoot "cameraunlock-core\powershell\ModDeployment.psm1") -Force
 $buildOutput = Join-Path $projectRoot "bin\$Configuration"
-$configFile = Join-Path $projectRoot 'HeadTracking.ini'
 $vendorRefZip = Join-Path $projectRoot 'vendor\reframework\REFramework.zip'
 $result = Invoke-DevDeployREFramework `
     -GameId 'resident-evil-village' `
     -GameDisplayName 'Resident Evil Village' `
     -BuildOutputPath $buildOutput `
     -ModDllName 'RE8HeadTracking.dll' `
-    -ConfigFile $configFile `
     -VendorReframeworkZip $vendorRefZip `
     -ExtraDlls @() `
     -GivenPath $GivenPath
@@ -40,7 +38,7 @@ Write-DeploymentSuccess `
     -DeployPath $result.DeployedDllPath `
     -Controls @(
         "End       - Toggle head tracking on/off",
-        "Page Up   - Cycle tracking mode (full / rotation-only / position-only)",
+        "Page Up   - Toggle position tracking",
         "Page Down - Toggle yaw mode (world / local)",
         "F9        - Toggle world-anchored GUI markers",
         "",
