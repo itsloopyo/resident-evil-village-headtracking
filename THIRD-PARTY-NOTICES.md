@@ -13,7 +13,7 @@ Resident Evil Village.
 |-----------|---------|---------|--------------|
 | REFramework (loader) | nightly-01394-ec6c81fd39831b328027ae00e102bc9c9c3f8aa5 | MIT | Bundled verbatim in the installer ZIP |
 | REFramework (plugin SDK headers) | source commit `ec6c81fd3983` | MIT | Copied at `extern/reframework/`, compiled into `RE8HeadTracking.dll` |
-| cameraunlock-core | e64a81ff0f7bde7ddb3102382a061b4c91f01254 | MIT | Compiled into `RE8HeadTracking.dll` |
+| cameraunlock-core | a03c24290fae3a9c61f67adcb7c5ba4eedf69f20 | MIT | Compiled into `RE8HeadTracking.dll` |
 | OpenTrack | n/a | ISC | Not bundled; UDP protocol interoperability only |
 
 ---
@@ -81,7 +81,7 @@ SOFTWARE.
 Git submodule at `cameraunlock-core/`, compiled into `RE8HeadTracking.dll`. Our own code,
 MIT licensed, reproduced here so the notices are complete.
 
-- Pinned commit: `e64a81ff0f7bde7ddb3102382a061b4c91f01254`
+- Pinned commit: `a03c24290fae3a9c61f67adcb7c5ba4eedf69f20`
 
 ```
 MIT License
